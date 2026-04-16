@@ -29,8 +29,8 @@ import {
   getBaseLayerUrlOrFallback,
   getDefaultMapCenter,
   getDefaultZoom,
-  getFloodOverlayTileUrl,
-  hasS3TileBase,
+  getFloodOverlayTileUrlWithBust,
+  hasCustomTileBase,
 } from './tileSources'
 
 export type { BaseLayerId, FloodReturnPeriod } from './tileSources'
@@ -190,7 +190,8 @@ function MapPane({
 }: MapPaneProps) {
   const baseUrl = useMemo(() => getBaseLayerUrlOrFallback(baseLayer), [baseLayer])
   const floodUrl = useMemo(
-    () => (floodEnabled ? getFloodOverlayTileUrl(floodPeriod) : null),
+    () =>
+      floodEnabled ? getFloodOverlayTileUrlWithBust(floodPeriod) : null,
     [floodEnabled, floodPeriod],
   )
   const floodOpacity = useMemo(
@@ -200,10 +201,14 @@ function MapPane({
 
   return (
     <>
+      {/*
+        URL includes ?v=… cache-bust on custom bases (tileSources.withTileCacheBust).
+        Bump VITE_TILE_CACHE_BUST after regenerating local tiles; Leaflet fetches XYZ per zoom/pan.
+      */}
       <TileLayer
         key={baseUrl}
         attribution={
-          hasS3TileBase()
+          hasCustomTileBase()
             ? '&copy; Project ortho / elevation tiles'
             : '&copy; OpenStreetMap'
         }
@@ -294,7 +299,7 @@ function FloodSimulationVeil({ level }: { level: number }) {
 export function MapViewer({ floodSimulationLevel = 0 }: MapViewerProps) {
   const center = useMemo(() => getDefaultMapCenter(), [])
   const zoom = useMemo(() => getDefaultZoom(), [])
-  const s3Ready = hasS3TileBase()
+  const customTilesReady = hasCustomTileBase()
 
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('orthomosaic')
   const [compareLayer, setCompareLayer] = useState<BaseLayerId>('dtm')
@@ -369,13 +374,15 @@ export function MapViewer({ floodSimulationLevel = 0 }: MapViewerProps) {
 
   return (
     <div className="mv-root">
-      {!s3Ready ? (
+      {!customTilesReady ? (
         <div className="mv-banner" role="status">
           <i className="fa-solid fa-circle-info" aria-hidden />
           <span>
-            Set <code className="mv-banner__code">VITE_S3_TILE_BASE_URL</code> to
-            load ortho, DEM, DTM, and flood tiles from S3. Showing OSM fallback
-            for base layers.
+            Set <code className="mv-banner__code">VITE_TILE_BASE_URL</code> or{' '}
+            <code className="mv-banner__code">VITE_S3_TILE_BASE_URL</code>{' '}
+            (e.g. FastAPI <code className="mv-banner__code">/tiles</code>) to load
+            ortho, DEM, DTM, and flood layers. Showing OSM fallback for base
+            layers.
           </span>
         </div>
       ) : null}
@@ -404,7 +411,7 @@ export function MapViewer({ floodSimulationLevel = 0 }: MapViewerProps) {
               <input
                 type="checkbox"
                 checked={floodOn}
-                disabled={!s3Ready}
+                disabled={!customTilesReady}
                 onChange={(e) => setFloodOn(e.target.checked)}
               />
               <span>Show flood tiles</span>
@@ -415,7 +422,7 @@ export function MapViewer({ floodSimulationLevel = 0 }: MapViewerProps) {
                   <input
                     type="radio"
                     name="mv-flood-period"
-                    disabled={!floodOn || !s3Ready}
+                    disabled={!floodOn || !customTilesReady}
                     checked={floodPeriod === p}
                     onChange={() => setFloodPeriod(p)}
                   />
@@ -510,16 +517,16 @@ export function MapViewer({ floodSimulationLevel = 0 }: MapViewerProps) {
             <MapContainer {...mapProps} style={{ height: '100%', width: '100%' }}>
               <MapPane
                 baseLayer={baseLayer}
-                floodEnabled={floodOn && s3Ready}
-                floodPeriod={floodPeriod}
-                floodSimulationLevel={floodSimulationLevel}
-                measureMode={measureMode}
-                measureActive={measureActive}
-                measurePoints={points}
-                areaFrozen={areaFrozen}
-                onMeasureAdd={onMeasureAdd}
-                onMeasureCloseRing={onMeasureCloseRing}
-                sync={splitView ? { ...syncRefs, isA: true } : undefined}
+              floodEnabled={floodOn && customTilesReady}
+              floodPeriod={floodPeriod}
+              floodSimulationLevel={floodSimulationLevel}
+              measureMode={measureMode}
+              measureActive={measureActive}
+              measurePoints={points}
+              areaFrozen={areaFrozen}
+              onMeasureAdd={onMeasureAdd}
+              onMeasureCloseRing={onMeasureCloseRing}
+              sync={splitView ? { ...syncRefs, isA: true } : undefined}
               />
             </MapContainer>
             <FloodSimulationVeil level={floodSimulationLevel} />
@@ -549,7 +556,7 @@ export function MapViewer({ floodSimulationLevel = 0 }: MapViewerProps) {
               <MapContainer {...mapProps} style={{ height: '100%', width: '100%' }}>
                 <MapPane
                   baseLayer={compareLayer}
-                  floodEnabled={floodOn && s3Ready}
+                  floodEnabled={floodOn && customTilesReady}
                   floodPeriod={floodPeriod}
                   floodSimulationLevel={floodSimulationLevel}
                   measureMode="none"

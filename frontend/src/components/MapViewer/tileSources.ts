@@ -1,19 +1,21 @@
 /**
- * S3 / CDN XYZ tile URL helpers.
+ * Generic XYZ tile URLs for any HTTP origin: FastAPI StaticFiles, MinIO, S3 website
+ * endpoints, CDNs, etc. No assumption about “bucket” hostnames or AWS URL shape.
  *
- * Expected object layout (customise prefixes via VITE_S3_* env vars):
+ * Template built as:
+ *   {tileBase}/{prefix}/{z}/{x}/{y}.{ext}
  *
- *   {VITE_S3_TILE_BASE_URL}/{prefix}/{z}/{x}/{y}.{ext}
+ * Example (local):
+ *   http://localhost:8000/tiles/orthomosaic/{z}/{x}/{y}.png
  *
- * Example (AWS S3 static website or public bucket):
- *   https://my-bucket.s3.eu-west-1.amazonaws.com/hydrology-964-acres/tiles/orthomosaic/12/2048/1360.png
- *
- * For CloudFront, set VITE_S3_TILE_BASE_URL to the distribution origin path instead.
+ * Env:
+ *   - Prefer VITE_TILE_BASE_URL; otherwise VITE_S3_TILE_BASE_URL (legacy name).
+ *   - Prefixes VITE_S3_* are folder names under that base (name kept for compatibility).
  */
 
 export type BaseLayerId = 'orthomosaic' | 'dem' | 'dtm'
 
-/** Flood return period folders under the S3 tile root. */
+/** Flood return period folders under the tile root. */
 export type FloodReturnPeriod = '1in25' | '1in50' | '1in100'
 
 const env = import.meta.env
@@ -22,16 +24,27 @@ function trimSlash(s: string): string {
   return s.replace(/\/+$/, '').replace(/^\/+/, '')
 }
 
-export function hasS3TileBase(): boolean {
-  return Boolean(env.VITE_S3_TILE_BASE_URL?.trim())
+/** Resolved HTTP root for tiles (local API, S3 static site, CDN, …). */
+export function getTileBaseUrl(): string | undefined {
+  const primary = env.VITE_TILE_BASE_URL?.trim()
+  const legacy = env.VITE_S3_TILE_BASE_URL?.trim()
+  return primary || legacy || undefined
+}
+
+/** True when a custom tile base URL is configured. */
+export function hasCustomTileBase(): boolean {
+  return Boolean(getTileBaseUrl())
 }
 
 export function getTileExtension(): string {
   return (env.VITE_S3_TILE_EXT ?? 'png').replace(/^\./, '')
 }
 
-/** Leaflet XYZ template `{z}/{x}/{y}` under your base URL. */
-export function buildS3XyzTemplate(
+/**
+ * Leaflet XYZ template `{z}/{x}/{y}` — plain URL concatenation only
+ * (no S3-specific signing or virtual-hosted-style rules).
+ */
+export function buildXyzTemplate(
   baseUrl: string,
   prefix: string,
   ext: string = getTileExtension(),
@@ -41,42 +54,71 @@ export function buildS3XyzTemplate(
   return `${base}/${path}/{z}/{x}/{y}.${ext}`
 }
 
+const OSM_HOST_MARKER = 'openstreetmap.org'
+
+/**
+ * Cache-bust query on custom templates. OSM unchanged.
+ * Optional VITE_TILE_CACHE_BUST; else defaults to "1".
+ */
+export function withTileCacheBust(urlTemplate: string): string {
+  if (!urlTemplate.includes('{z}')) return urlTemplate
+  if (urlTemplate.includes(OSM_HOST_MARKER)) return urlTemplate
+  const bust = env.VITE_TILE_CACHE_BUST?.trim() || '1'
+  const sep = urlTemplate.includes('?') ? '&' : '?'
+  return `${urlTemplate}${sep}v=${encodeURIComponent(bust)}`
+}
+
+/** Path segment(s) under the tile base for each layer (no leading “tiles/” — base URL already includes /tiles when local). */
 function defaultPrefix(layer: BaseLayerId): string {
-  if (layer === 'orthomosaic') return env.VITE_S3_ORTHO_PREFIX ?? 'tiles/orthomosaic'
-  if (layer === 'dem') return env.VITE_S3_DEM_PREFIX ?? 'tiles/dem'
-  return env.VITE_S3_DTM_PREFIX ?? 'tiles/dtm'
+  if (layer === 'orthomosaic') {
+    return env.VITE_S3_ORTHO_PREFIX?.trim() || 'orthomosaic'
+  }
+  if (layer === 'dem') {
+    return env.VITE_S3_DEM_PREFIX?.trim() || 'dem'
+  }
+  return env.VITE_S3_DTM_PREFIX?.trim() || 'dtm'
 }
 
 function defaultFloodPrefix(period: FloodReturnPeriod): string {
   if (period === '1in25') {
-    return env.VITE_S3_FLOOD_1IN25_PREFIX ?? 'tiles/flood/1in25'
+    return env.VITE_S3_FLOOD_1IN25_PREFIX?.trim() || 'flood/1in25'
   }
   if (period === '1in50') {
-    return env.VITE_S3_FLOOD_1IN50_PREFIX ?? 'tiles/flood/1in50'
+    return env.VITE_S3_FLOOD_1IN50_PREFIX?.trim() || 'flood/1in50'
   }
-  return env.VITE_S3_FLOOD_1IN100_PREFIX ?? 'tiles/flood/1in100'
+  return env.VITE_S3_FLOOD_1IN100_PREFIX?.trim() || 'flood/1in100'
 }
 
 /** XYZ URL template for a base imagery / elevation layer. */
 export function getBaseLayerTileUrl(layer: BaseLayerId): string | null {
-  const base = env.VITE_S3_TILE_BASE_URL?.trim()
+  const base = getTileBaseUrl()
   if (!base) return null
-  return buildS3XyzTemplate(base, defaultPrefix(layer))
+  return buildXyzTemplate(base, defaultPrefix(layer))
 }
 
 /** XYZ URL template for flood hazard tiles for a return period. */
 export function getFloodOverlayTileUrl(period: FloodReturnPeriod): string | null {
-  const base = env.VITE_S3_TILE_BASE_URL?.trim()
+  const base = getTileBaseUrl()
   if (!base) return null
-  return buildS3XyzTemplate(base, defaultFloodPrefix(period))
+  return buildXyzTemplate(base, defaultFloodPrefix(period))
 }
 
-/** OpenStreetMap fallback when S3 base is not configured (local dev). */
+/** OpenStreetMap fallback when no custom tile base is configured. */
 export const OSM_FALLBACK_URL =
   'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 
 export function getBaseLayerUrlOrFallback(layer: BaseLayerId): string {
-  return getBaseLayerTileUrl(layer) ?? OSM_FALLBACK_URL
+  const raw = getBaseLayerTileUrl(layer) ?? OSM_FALLBACK_URL
+  return withTileCacheBust(raw)
+}
+
+/** Flood template with cache bust (same rules as base layers). */
+export function getFloodOverlayTileUrlWithBust(
+  period: FloodReturnPeriod,
+): string | null {
+  const raw = getFloodOverlayTileUrl(period)
+  if (!raw) return null
+  return withTileCacheBust(raw)
 }
 
 export function getDefaultMapCenter(): [number, number] {

@@ -1,5 +1,13 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+# Map tiles, ortho, DEM, videos, etc. (served under /tiles for the React app).
+LOCAL_DATA_PATH = r"D:/Codings/Hydrology Data Portal React Version/Project_Data"
+
+Path(LOCAL_DATA_PATH).mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="Hydrology & Mapping Portal API",
@@ -16,6 +24,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.mount(
+    "/tiles",
+    StaticFiles(directory=LOCAL_DATA_PATH),
+    name="local-tiles",
 )
 
 

@@ -1,8 +1,12 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Root URL for XYZ tiles, e.g. https://bucket.s3.eu-west-1.amazonaws.com/964-acres */
+  /** Preferred root URL for XYZ tiles (local FastAPI, CDN, etc.) */
+  readonly VITE_TILE_BASE_URL?: string
+  /** Legacy alias for VITE_TILE_BASE_URL (same semantics — not AWS-specific). */
   readonly VITE_S3_TILE_BASE_URL?: string
+  /** Bump to invalidate browser cache after regenerating local tiles (optional; default "1" in code). */
+  readonly VITE_TILE_CACHE_BUST?: string
   /** Path segment under base for orthomosaic tiles (default: tiles/orthomosaic) */
   readonly VITE_S3_ORTHO_PREFIX?: string
   readonly VITE_S3_DEM_PREFIX?: string
